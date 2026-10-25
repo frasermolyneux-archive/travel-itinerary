@@ -18,7 +18,7 @@ The application startup smoke test runs with `dotnet test src/MX.TravelItinerary
 
 ```pwsh
 terraform -chdir=terraform fmt -check -recursive
-terraform -chdir=terraform init -backend-config=backends/dev.backend.hcl
+terraform -chdir=terraform init -lockfile=readonly -backend-config=backends/dev.backend.hcl
 terraform -chdir=terraform validate
 terraform -chdir=terraform plan -var-file=tfvars/dev.tfvars
 ```
@@ -31,7 +31,7 @@ terraform -chdir=terraform plan -var-file=tfvars/dev.tfvars
 - **PWA/service worker**: `wwwroot/sw.js` is cache-first for static assets and network-first for pages. Bump `CACHE_VERSION` in `sw.js` whenever cached asset contents change, or clients will serve stale files. See `docs/OFFLINE_SUPPORT.md` for full behavior.
 - **Vendored vs. maintained assets**: `wwwroot/lib/*` (bootstrap, jquery, jquery-validation, jquery-validation-unobtrusive) are vendored — do not hand-edit. Maintained app JS lives in `wwwroot/js/*.js` (`pwa.js`, `shared-trips.js`, `site.js`).
 - **Data/secrets**: Azure Table Storage via `DefaultAzureCredential`; no client secrets, connection strings, or hardcoded subscription IDs/GUIDs. Local config uses `appsettings.Development.json`/user-secrets; production uses Key Vault references set by Terraform.
-- **Terraform** (`terraform/`): App Service, Storage, DNS, Key Vault, Entra ID app registration, remote state from `platform-hosting`/`platform-monitoring`. `.terraform.lock.hcl` is gitignored and untracked — do not commit it.
+- **Terraform** (`terraform/`): App Service, Storage, DNS, Key Vault, Entra ID app registration, remote state from `platform-hosting`/`platform-monitoring`. Commit each root's `.terraform-version` and `.terraform.lock.hcl`. Select the exact root CLI pin before invoking Terraform; normal initialization uses `-lockfile=readonly`. Regenerate provider selections only in a reviewed dependency-update PR; never commit state, plans, or `.terraform/`.
 - **Runtime/deployment**: target `net10.0` (pinned via `global.json`); Azure Linux Web App runtime stack `dotnet_version = "10.0"`. Deployment is handled by `deploy-dev.yml`/`deploy-prd.yml` — out of scope unless that is the explicit task.
 
 ## Do NOT
