@@ -10,3 +10,7 @@
 - **Testing**: No automated tests today; rely on manual UI flows and offline checks (toggle offline in browser devtools, verify cache updates/service worker refresh).
 - **Infra**: Terraform under `terraform/` builds App Service, storage, DNS, identities, monitoring (per-environment tfvars/backends). GitHub Actions workflows cover build/test, codequality, PR verify, deploy-dev/prd, destroy-development/environment, dependabot-automerge, and copilot-setup-steps.
 - **Gotchas**: Keep everything ASCII. Service worker cache busting relies on updating `sw.js` cache name when assets change. DefaultAzureCredential needs either local Entra login or managed identity in Azure.
+
+## Terraform toolchain
+
+Commit each root's `.terraform-version` and `.terraform.lock.hcl`. Select the exact root CLI pin before invoking Terraform; normal initialization uses `-lockfile=readonly`. Regenerate provider selections only in a reviewed dependency-update PR; never commit state, plans, or `.terraform/`.
