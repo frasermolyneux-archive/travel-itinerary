@@ -39,3 +39,6 @@ terraform -chdir=terraform plan -var-file=tfvars/dev.tfvars
 - Do not modify `.github/workflows/` (other than an explicitly requested workflow change), `version.json`, or `Directory.Build.props`.
 - Do not introduce client secrets, connection strings, or hardcoded subscription IDs/GUIDs.
 - Do not change app behavior, dependencies, target framework, public contracts, generated/vendored assets, Terraform providers, or deployment wiring unless that is the explicit task.
+
+
+CI-only main pushes are excluded by deployment push-path filters before workflow concurrency; they do not enqueue or displace cloud/backend deployments. Automatic deployment requires a change to the workload inputs already declared by the deployment filters; scheduled maintenance and explicit workflow dispatch retain their existing behavior. A deployment-workflow-only change requires explicit dispatch to exercise cloud operations.
