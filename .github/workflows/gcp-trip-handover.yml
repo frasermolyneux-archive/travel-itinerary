@@ -1,0 +1,124 @@
+name: Enable Trip Side Kick GCP Federation
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Confirm the retained project: gcp-mx-io-travel-itinerary"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  enable-trip:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: Production
+    concurrency:
+      group: retained-gcp-project-handover
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CONFIRMATION: ${{ inputs.confirmation }}
+      PROJECT: gcp-mx-io-travel-itinerary
+      PROJECT_NUMBER: "776197093213"
+      SERVICE_ACCOUNT: terraform-platform@gcp-mx-io-travel-itinerary.iam.gserviceaccount.com
+    steps:
+      - name: Validate the approved project and identity
+        env:
+          CONFIGURED_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          CONFIGURED_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          CONFIGURED_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = "$PROJECT"
+          test "$CONFIGURED_PROJECT" = "$PROJECT"
+          test "$CONFIGURED_ACCOUNT" = "$SERVICE_ACCOUNT"
+          test "$CONFIGURED_PROVIDER" = \
+            "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github-actions/providers/github-provider"
+
+      - name: Authenticate using existing federation
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+
+      - name: Add only the approved replacement repository
+        shell: python
+        run: |
+          import json
+          import os
+          import subprocess
+
+          project = os.environ["PROJECT"]
+          account = os.environ["SERVICE_ACCOUNT"]
+          project_number = os.environ["PROJECT_NUMBER"]
+          old = (
+              "assertion.repository == 'frasermolyneux/platform-workloads' || "
+              "assertion.repository == 'frasermolyneux/travel-itinerary'"
+          )
+          desired = old + " || assertion.repository == 'frasermolyneux/trip-side-kick'"
+          provider_args = [
+              "--project=" + project, "--location=global",
+              "--workload-identity-pool=github-actions",
+          ]
+
+          def gcloud(*arguments):
+              return subprocess.check_output(
+                  ["gcloud", *arguments, "--quiet", "--format=json"], text=True
+              )
+
+          def provider():
+              return json.loads(gcloud(
+                  "iam", "workload-identity-pools", "providers", "describe",
+                  "github-provider", *provider_args
+              ))
+
+          before = provider()
+          expected_mapping = {
+              "google.subject": "assertion.sub",
+              "attribute.repository": "assertion.repository",
+              "attribute.repository_owner": "assertion.repository_owner",
+          }
+          if (
+              before.get("state") != "ACTIVE"
+              or before.get("oidc", {}).get("issuerUri") != "https://token.actions.githubusercontent.com"
+              or before.get("attributeMapping") != expected_mapping
+              or before.get("attributeCondition") not in (old, desired)
+          ):
+              raise RuntimeError("Federation differs from the audited contract; stop for review.")
+          if before["attributeCondition"] != desired:
+              gcloud(
+                  "iam", "workload-identity-pools", "providers", "update-oidc",
+                  "github-provider", *provider_args, "--attribute-condition=" + desired
+              )
+          member = (
+              "principalSet://iam.googleapis.com/projects/" + project_number
+              + "/locations/global/workloadIdentityPools/github-actions"
+              + "/attribute.repository/frasermolyneux/trip-side-kick"
+          )
+          gcloud(
+              "iam", "service-accounts", "add-iam-policy-binding", account,
+              "--project=" + project, "--role=roles/iam.workloadIdentityUser",
+              "--member=" + member, "--condition=None"
+          )
+          policy = json.loads(gcloud(
+              "iam", "service-accounts", "get-iam-policy", account,
+              "--project=" + project
+          ))
+          if provider().get("attributeCondition") != desired or not any(
+              binding.get("role") == "roles/iam.workloadIdentityUser"
+              and "condition" not in binding
+              and member in binding.get("members", [])
+              for binding in policy.get("bindings", [])
+          ):
+              raise RuntimeError("Trip Side Kick federation did not verify.")
+          print("Verified Trip Side Kick trust. Existing repositories remain trusted.")
+          print("No project, billing, API enablement or API key was changed.")
