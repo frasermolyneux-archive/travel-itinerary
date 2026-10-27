@@ -1,0 +1,113 @@
+name: Forget Retained Google API Ownership
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  forget:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.environment }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - environment: Development
+            short: dev
+          - environment: Production
+            short: prd
+    concurrency:
+      group: ${{ github.repository }}-${{ matrix.short }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT: gcp-mx-io-travel-itinerary
+      ENVIRONMENT: ${{ matrix.short }}
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_USE_AZUREAD: "true"
+      ARM_USE_OIDC: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+      - name: Require the retained APIs and replacement key before relinquishing ownership
+        shell: python
+        run: |
+          import json
+          import os
+          import subprocess
+
+          project = os.environ["PROJECT"]
+          def gcloud(*arguments):
+              return json.loads(subprocess.check_output(
+                  ["gcloud", *arguments, "--project=" + project, "--format=json"], text=True
+              ))
+
+          enabled = {entry["config"]["name"] for entry in gcloud("services", "list", "--enabled")}
+          targets = {"maps-backend.googleapis.com", "places.googleapis.com"}
+          keys = gcloud("services", "api-keys", "list")
+          expected_referrers = {
+              "https://tripsidekick.app/*", "https://www.tripsidekick.app/*",
+              "https://tripsidekick.net/*", "https://www.tripsidekick.net/*",
+          }
+          replacement = [
+              key for key in keys
+              if key["name"].endswith("/keys/maps-trip-side-kick-prd-31aac1a62737")
+              and not key.get("deleteTime")
+              and {
+                  target["service"] for target in key.get("restrictions", {}).get("apiTargets", [])
+              } == targets
+              and set(key.get("restrictions", {}).get("browserKeyRestrictions", {}).get(
+                  "allowedReferrers", []
+              )) == expected_referrers
+          ]
+          if not targets <= enabled or len(replacement) != 1:
+              raise RuntimeError("Retained APIs or reviewed replacement key are not ready; no state changed.")
+          print("Verified enabled APIs and exact replacement key restrictions without reading key strings.")
+      - name: Select the unwrapped pinned CLI for JSON validation
+        uses: frasermolyneux/actions/terraform-setup@terraform-setup/v1.0.0
+        with:
+          terraform-folder: terraform
+          terraform_wrapper: "false"
+      - name: Create the handover plan only inside this isolated job
+        run: |
+          set -euo pipefail
+          umask 077
+          terraform -chdir=terraform init -input=false -lockfile=readonly \
+            -backend-config="backends/$ENVIRONMENT.backend.hcl"
+          terraform -chdir=terraform validate
+          terraform -chdir=terraform plan -input=false -var-file="tfvars/$ENVIRONMENT.tfvars" \
+            -target=google_project_service.maps_backend -target=google_project_service.places_api \
+            -out=gcp-handover.tfplan
+      - name: Reject every action except the exact API forgets
+        run: |
+          set -euo pipefail
+          terraform -chdir=terraform show -json gcp-handover.tfplan |
+            python3 .github/scripts/check_gcp_handover.py forget --environment "$ENVIRONMENT"
+      - name: Apply only the guarded same-job handover plan
+        run: terraform -chdir=terraform apply -input=false gcp-handover.tfplan
+      - name: Verify no Google API enablement remains in this state
+        env:
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_USE_AZUREAD: "true"
+          ARM_USE_OIDC: "true"
+        run: |
+          set -euo pipefail
+          addresses=$(terraform -chdir=terraform state list)
+          if grep -Eq '(^|\.)google_project_service\.' <<< "$addresses"; then
+            echo "::error::Retained API ownership remains in state"
+            exit 1
+          fi
+          echo "Retained APIs are absent from this legacy state; other resources remain managed."

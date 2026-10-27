@@ -16,11 +16,19 @@ permissions: {}
 
 jobs:
   terraform-destroy:
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       id-token: write
     environment: ${{ inputs.environment == 'prd' && 'Production' || 'Development' }}
     runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_USE_AZUREAD: "true"
+      ARM_USE_OIDC: "true"
     concurrency:
       group: ${{ github.repository }}-${{ inputs.environment }}
     steps:
@@ -39,15 +47,32 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
-      - uses: frasermolyneux/actions/terraform-destroy@terraform-destroy/v2.0.0
+      - name: Select the unwrapped pinned CLI for JSON validation
+        uses: frasermolyneux/actions/terraform-setup@terraform-setup/v1.0.0
         with:
-          terraform-folder: "terraform"
-          terraform-var-file: ${{ inputs.environment == 'prd' && 'tfvars/prd.tfvars' || 'tfvars/dev.tfvars' }}
-          terraform-backend-file: ${{ inputs.environment == 'prd' && 'backends/prd.backend.hcl' || 'backends/dev.backend.hcl' }}
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          perform-checkout: "false"
+          terraform-folder: terraform
+          terraform_wrapper: "false"
+
+      - name: Plan retirement only inside this isolated job
+        run: |
+          set -euo pipefail
+          umask 077
+          terraform -chdir=terraform init -input=false -lockfile=readonly \
+            -backend-config="backends/$ENVIRONMENT.backend.hcl"
+          terraform -chdir=terraform validate
+          terraform -chdir=terraform plan -input=false -destroy \
+            -var-file="tfvars/$ENVIRONMENT.tfvars" -out=retirement.tfplan
+
+      - name: Stop if retirement would destroy retained Google resources
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          terraform -chdir=terraform show -json retirement.tfplan |
+            python3 .github/scripts/check_gcp_handover.py destroy --environment "$ENVIRONMENT"
+
+      - name: Apply only the validated retirement plan
+        run: terraform -chdir=terraform apply -input=false retirement.tfplan
 
       - name: Remove automatically recreated Failure Anomalies rule
         if: inputs.environment == 'dev'

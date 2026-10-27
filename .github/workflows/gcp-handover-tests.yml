@@ -1,0 +1,28 @@
+name: Google Retirement Guard Tests
+
+on:
+  pull_request:
+    paths:
+      - ".github/scripts/check_gcp_handover.py"
+      - ".github/scripts/test_check_gcp_handover.py"
+      - ".github/workflows/gcp-*.yml"
+      - ".github/workflows/destroy-*.yml"
+      - "terraform/google_maps.tf"
+  push:
+    branches: [main]
+    paths:
+      - ".github/scripts/check_gcp_handover.py"
+      - ".github/scripts/test_check_gcp_handover.py"
+      - ".github/workflows/gcp-*.yml"
+      - ".github/workflows/destroy-*.yml"
+      - "terraform/google_maps.tf"
+
+permissions:
+  contents: read
+
+jobs:
+  guard-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: python3 -m unittest discover -s .github/scripts -p "test_check_gcp_handover.py" -v
