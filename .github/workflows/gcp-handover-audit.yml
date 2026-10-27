@@ -54,7 +54,7 @@ jobs:
               --format='json(projectId,projectNumber,lifecycleState)'
             gcloud services list --enabled --project="$PROJECT" \
               --format='json(config.name)'
-            gcloud services api-keys list --project="$PROJECT" --location=global \
+            gcloud services api-keys list --project="$PROJECT" \
               --format='json(name,displayName,restrictions)'
             gcloud iam workload-identity-pools providers describe github-provider \
               --project="$PROJECT" --location=global \
