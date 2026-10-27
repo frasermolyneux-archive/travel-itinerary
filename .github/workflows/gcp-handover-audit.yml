@@ -1,0 +1,66 @@
+name: GCP Handover Audit
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/gcp-handover-audit.yml
+
+permissions: {}
+
+jobs:
+  inventory:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: Production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT: gcp-mx-io-travel-itinerary
+      PROJECT_NUMBER: "776197093213"
+      SERVICE_ACCOUNT: terraform-platform@gcp-mx-io-travel-itinerary.iam.gserviceaccount.com
+    steps:
+      - name: Validate the existing project binding
+        env:
+          CONFIGURED_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          CONFIGURED_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          CONFIGURED_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test "$CONFIGURED_PROJECT" = "$PROJECT"
+          test "$CONFIGURED_ACCOUNT" = "$SERVICE_ACCOUNT"
+          test "$CONFIGURED_PROVIDER" = \
+            "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github-actions/providers/github-provider"
+
+      - name: Authenticate using existing federation
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+
+      - name: Inspect retained APIs, key restrictions and federation
+        run: |
+          set -euo pipefail
+          {
+            echo '## Retained Google project'
+            echo 'This audit does not retrieve key strings or modify cloud resources.'
+            echo '```json'
+            gcloud projects describe "$PROJECT" \
+              --format='json(projectId,projectNumber,lifecycleState)'
+            gcloud services list --enabled --project="$PROJECT" \
+              --format='json(config.name)'
+            gcloud services api-keys list --project="$PROJECT" --location=global \
+              --format='json(name,displayName,restrictions)'
+            gcloud iam workload-identity-pools providers describe github-provider \
+              --project="$PROJECT" --location=global \
+              --workload-identity-pool=github-actions \
+              --format='json(name,state,oidc.issuerUri,attributeMapping,attributeCondition)'
+            gcloud iam service-accounts get-iam-policy "$SERVICE_ACCOUNT" \
+              --project="$PROJECT" --format=json
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
