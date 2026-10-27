@@ -2,11 +2,6 @@ name: Enable Trip Side Kick GCP Federation
 
 on:
   workflow_dispatch:
-    inputs:
-      confirmation:
-        description: "Confirm the retained project: gcp-mx-io-travel-itinerary"
-        required: true
-        type: string
 
 permissions: {}
 
@@ -23,7 +18,6 @@ jobs:
       contents: read
       id-token: write
     env:
-      CONFIRMATION: ${{ inputs.confirmation }}
       PROJECT: gcp-mx-io-travel-itinerary
       PROJECT_NUMBER: "776197093213"
       SERVICE_ACCOUNT: terraform-platform@gcp-mx-io-travel-itinerary.iam.gserviceaccount.com
@@ -35,7 +29,6 @@ jobs:
           CONFIGURED_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
-          test "$CONFIRMATION" = "$PROJECT"
           test "$CONFIGURED_PROJECT" = "$PROJECT"
           test "$CONFIGURED_ACCOUNT" = "$SERVICE_ACCOUNT"
           test "$CONFIGURED_PROVIDER" = \
