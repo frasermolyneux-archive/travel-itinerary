@@ -1,15 +1,7 @@
 name: Deploy Prd
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/**'
-      - 'terraform/**'
   workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * 4"
 
 permissions: {}
 
