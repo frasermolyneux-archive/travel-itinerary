@@ -18,8 +18,10 @@ was verified using isolated built-in resources before writing the guard.
    APIs and exact replacement key restrictions, then runs both Development and
    Production sequentially using their existing identities and backends.
    The exceptional targeted plans may contain only the two exact `forget`
-   actions and no output changes. The saved-plan apply verifies its source,
-   toolchain and environment; the final state-list check rejects any remaining
+   actions and no output changes. Shared setup enforces the pinned CLI/providers;
+   the approved-main job creates, guards and consumes its saved plan without
+   upload or download, using the same fixed environment/backend throughout.
+   The final state-list check rejects any remaining
    Google service resources. Repeating an already completed handover is safe.
 3. After the new host, authentication and restore acceptance pass, run the
    approved legacy environment destroys. Both destroy entry points validate
@@ -38,3 +40,6 @@ was verified using isolated built-in resources before writing the guard.
 No Google key string or Terraform state should be printed or attached to an
 issue, PR discussion or job summary. The checks inspect metadata or read a
 plan through a pipe and emit only credential-free diagnostics.
+Saved plans can contain sensitive existing state even when their displayed
+changes are harmless, so all three guarded operations keep them inside the
+isolated job. No binary plan artifact is published.

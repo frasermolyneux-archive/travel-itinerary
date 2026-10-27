@@ -13,6 +13,12 @@ jobs:
       id-token: write # This is required for Az CLI Login
     environment: Development
     runs-on: ubuntu-latest
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_USE_AZUREAD: "true"
+      ARM_USE_OIDC: "true"
 
     concurrency: # # This is required to prevent multiple GitHub Actions invocations against stateful resources. e.g. Terraform state file / Database / Deployed Apps
       group: ${{ github.repository }}-dev
@@ -33,27 +39,21 @@ jobs:
         workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
-    - name: Plan retirement without applying
-      uses: frasermolyneux/actions/terraform-plan@terraform-plan/v2.0.0
-      with:
-        terraform-folder: "terraform"
-        terraform-environment: dev
-        terraform-var-file: "tfvars/dev.tfvars"
-        terraform-backend-file: "backends/dev.backend.hcl"
-        terraform-additional-args: "-destroy"
-        plan-file-name: retirement.tfplan
-        plan-artifact-name: retirement-dev
-        enable-pr-comment: "false"
-        AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-        AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-        AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-        perform-checkout: "false"
-
     - name: Select the unwrapped pinned CLI for JSON validation
       uses: frasermolyneux/actions/terraform-setup@terraform-setup/v1.0.0
       with:
         terraform-folder: terraform
         terraform_wrapper: "false"
+
+    - name: Plan retirement only inside this isolated job
+      run: |
+        set -euo pipefail
+        umask 077
+        terraform -chdir=terraform init -input=false -lockfile=readonly \
+          -backend-config=backends/dev.backend.hcl
+        terraform -chdir=terraform validate
+        terraform -chdir=terraform plan -input=false -destroy \
+          -var-file=tfvars/dev.tfvars -out=retirement.tfplan
 
     - name: Stop if retirement would destroy retained Google resources
       run: |
@@ -62,17 +62,7 @@ jobs:
           python3 .github/scripts/check_gcp_handover.py destroy --environment dev
 
     - name: Apply only the validated retirement plan
-      uses: frasermolyneux/actions/terraform-apply@terraform-apply/v2.0.0
-      with:
-        perform-checkout: "false"
-        terraform-folder: terraform
-        terraform-environment: dev
-        terraform-backend-file: backends/dev.backend.hcl
-        plan-file-name: retirement.tfplan
-        plan-artifact-name: retirement-dev
-        AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-        AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-        AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      run: terraform -chdir=terraform apply -input=false retirement.tfplan
 
     - name: Remove automatically recreated Failure Anomalies rule
       shell: bash

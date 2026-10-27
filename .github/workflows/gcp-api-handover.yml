@@ -28,6 +28,11 @@ jobs:
     env:
       PROJECT: gcp-mx-io-travel-itinerary
       ENVIRONMENT: ${{ matrix.short }}
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_USE_AZUREAD: "true"
+      ARM_USE_OIDC: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
@@ -69,41 +74,28 @@ jobs:
           if not targets <= enabled or len(replacement) != 1:
               raise RuntimeError("Retained APIs or reviewed replacement key are not ready; no state changed.")
           print("Verified enabled APIs and exact replacement key restrictions without reading key strings.")
-      - uses: frasermolyneux/actions/terraform-plan@terraform-plan/v2.0.0
-        with:
-          perform-checkout: "false"
-          terraform-folder: terraform
-          terraform-environment: ${{ matrix.short }}
-          terraform-var-file: tfvars/${{ matrix.short }}.tfvars
-          terraform-backend-file: backends/${{ matrix.short }}.backend.hcl
-          terraform-additional-args: -target=google_project_service.maps_backend -target=google_project_service.places_api
-          plan-file-name: gcp-handover.tfplan
-          plan-artifact-name: gcp-handover-${{ matrix.short }}
-          enable-pr-comment: "false"
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - name: Select the unwrapped pinned CLI for JSON validation
         uses: frasermolyneux/actions/terraform-setup@terraform-setup/v1.0.0
         with:
           terraform-folder: terraform
           terraform_wrapper: "false"
+      - name: Create the handover plan only inside this isolated job
+        run: |
+          set -euo pipefail
+          umask 077
+          terraform -chdir=terraform init -input=false -lockfile=readonly \
+            -backend-config="backends/$ENVIRONMENT.backend.hcl"
+          terraform -chdir=terraform validate
+          terraform -chdir=terraform plan -input=false -var-file="tfvars/$ENVIRONMENT.tfvars" \
+            -target=google_project_service.maps_backend -target=google_project_service.places_api \
+            -out=gcp-handover.tfplan
       - name: Reject every action except the exact API forgets
         run: |
           set -euo pipefail
           terraform -chdir=terraform show -json gcp-handover.tfplan |
             python3 .github/scripts/check_gcp_handover.py forget --environment "$ENVIRONMENT"
-      - uses: frasermolyneux/actions/terraform-apply@terraform-apply/v2.0.0
-        with:
-          perform-checkout: "false"
-          terraform-folder: terraform
-          terraform-environment: ${{ matrix.short }}
-          terraform-backend-file: backends/${{ matrix.short }}.backend.hcl
-          plan-file-name: gcp-handover.tfplan
-          plan-artifact-name: gcp-handover-${{ matrix.short }}
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Apply only the guarded same-job handover plan
+        run: terraform -chdir=terraform apply -input=false gcp-handover.tfplan
       - name: Verify no Google API enablement remains in this state
         env:
           ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
