@@ -63,4 +63,4 @@ jobs:
             gcloud iam service-accounts get-iam-policy "$SERVICE_ACCOUNT" \
               --project="$PROJECT" --format=json
             echo '```'
-          } >>"$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
