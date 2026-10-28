@@ -11,6 +11,11 @@ on:
         options:
           - dev
           - prd
+      apply:
+        description: "Apply the guarded retirement plan after reviewing a plan-only run"
+        required: true
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -72,10 +77,11 @@ jobs:
             python3 .github/scripts/check_gcp_handover.py destroy --environment "$ENVIRONMENT"
 
       - name: Apply only the validated retirement plan
+        if: inputs.apply
         run: terraform -chdir=terraform apply -input=false retirement.tfplan
 
       - name: Remove automatically recreated Failure Anomalies rule
-        if: inputs.environment == 'dev'
+        if: inputs.apply && inputs.environment == 'dev'
         shell: bash
         run: |
           set -euo pipefail
@@ -87,7 +93,7 @@ jobs:
           fi
 
       - name: Assert development resource group is empty
-        if: inputs.environment == 'dev'
+        if: inputs.apply && inputs.environment == 'dev'
         shell: bash
         run: |
           set -euo pipefail
