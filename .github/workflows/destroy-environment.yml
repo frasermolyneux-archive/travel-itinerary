@@ -81,24 +81,24 @@ jobs:
         run: terraform -chdir=terraform apply -input=false retirement.tfplan
 
       - name: Remove automatically recreated Failure Anomalies rule
-        if: inputs.apply && inputs.environment == 'dev'
+        if: inputs.apply
         shell: bash
         run: |
           set -euo pipefail
-          SMART_DETECTOR_ID="/subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/rg-travel-itinerary-dev-swedencentral/providers/Microsoft.AlertsManagement/smartDetectorAlertRules/Failure Anomalies - ai-travel-itinerary-dev-swedencentral"
+          SMART_DETECTOR_ID="/subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/rg-travel-itinerary-$ENVIRONMENT-swedencentral/providers/Microsoft.AlertsManagement/smartDetectorAlertRules/Failure Anomalies - ai-travel-itinerary-$ENVIRONMENT-swedencentral"
 
           if az resource show --ids "$SMART_DETECTOR_ID" --api-version 2021-04-01 --only-show-errors >/dev/null 2>&1; then
             echo "Deleting $SMART_DETECTOR_ID"
             az resource delete --ids "$SMART_DETECTOR_ID" --api-version 2021-04-01 --only-show-errors
           fi
 
-      - name: Assert development resource group is empty
-        if: inputs.apply && inputs.environment == 'dev'
+      - name: Assert workload resource group is empty
+        if: inputs.apply
         shell: bash
         run: |
           set -euo pipefail
-          RESOURCE_GROUP="rg-travel-itinerary-dev-swedencentral"
-          SERVICE_PLAN_ID="/subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Web/serverfarms/asp-travel-itinerary-dev-swedencentral-default"
+          RESOURCE_GROUP="rg-travel-itinerary-$ENVIRONMENT-swedencentral"
+          SERVICE_PLAN_ID="/subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Web/serverfarms/asp-travel-itinerary-$ENVIRONMENT-swedencentral-default"
 
           for ATTEMPT in {1..6}; do
             REMAINING_IDS=$(az resource list --resource-group "$RESOURCE_GROUP" --query "[].id" --output tsv --only-show-errors)
@@ -109,7 +109,7 @@ jobs:
             fi
 
             if [ -z "$REMAINING_IDS" ] && [ "$SERVICE_PLAN_EXISTS" = false ]; then
-              echo "$RESOURCE_GROUP is empty and the owned development App Service plan is absent"
+              echo "$RESOURCE_GROUP is empty and its owned App Service plan is absent"
               exit 0
             fi
 
@@ -119,7 +119,7 @@ jobs:
             fi
           done
 
-          echo "::error::Development destroy left Azure resources behind"
+          echo "::error::Workload destroy left Azure resources behind"
           if [ -n "$REMAINING_IDS" ]; then
             echo "Remaining resource IDs:"
             printf '%s\n' "$REMAINING_IDS"
